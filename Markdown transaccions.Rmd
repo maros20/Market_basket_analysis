@@ -1,0 +1,475 @@
+---
+title: "Markdown transactions"
+output: html_document
+warning: FALSE
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+# Cargamos librerias
+library("dplyr")
+library("caret")
+library("ggplot2")
+library("lattice")
+library(corrplot)
+library(psych)
+library(GGally)
+library(gridExtra)
+library(lmtest)
+library(car)
+library(gbm)
+library(e1071)
+library(RColorBrewer)
+library("arules")
+library("arulesViz")
+library(pdftools)
+library(readxl)
+library(stringr)
+library("tidyverse")
+
+transacciones <- read.transactions("ElectronidexTransactions2017.csv", sep = ",", format = "basket") # leemos las transacciones
+cat_prod<-read_excel("categorias productos.xlsx") # cargamos el excel de las categorias como df 
+df_transaccions<- read.csv("ElectronidexTransactions2017.csv", header = FALSE ) # cargamos las transacciones como df para poder trabajarlas
+df_transaccions %>% 
+  filter(V1 == "")   # Filtramos por celdas vacias en la columna 1, para validar el df.
+
+# Definiendo indices de filas con el primer elemento nulo
+indexes <- df_transaccions[df_transaccions$V1 == "",]
+indexes_null <- as.numeric(rownames(indexes))
+
+#Redefiniendo df_transactions sin los indices de transacciones nulas
+df_transaccions <- df_transaccions[-indexes_null,]
+
+```
+
+#EDA Preliminar
+- Observamos la distribución de las transacciones
+
+```{r, echo=FALSE}
+# Muestra información resumida sobre el tamaño de las transacciones
+summary(size(transacciones))  # Información general
+
+# Calcula los cuantiles del tamaño de las transacciones
+quantile(size(transacciones), probs = seq(0, 1, 0.1))
+
+# Crea un DataFrame con el tamaño de las transacciones y genera un histograma
+data.frame(size(transacciones)) %>%
+  ggplot(aes(x = size(transacciones))) +
+  geom_histogram() +
+  labs(
+    title = "Distribución del tamaño de las transacciones",  # Título del gráfico
+    x = "Tamaño"  # Etiqueta del eje x
+  ) +
+  theme_bw()  # Establece un tema de fondo blanco para el gráfico
+
+```
+
+## TOP 20 productos
+
+```{r, echo=FALSE}
+# Supongamos que tienes un objeto de reglas llamado 'transacciones'
+# itemFrequency(transacciones) calcula la frecuencia de cada elemento en las reglas
+item_freq <- itemFrequency(transacciones)
+
+# Ordena la frecuencia de los elementos de manera descendente
+sorted_freq <- sort(item_freq, decreasing = TRUE)
+
+# Muestra solo las 10 principales
+top_n <- 20
+top_items <- sorted_freq[1:top_n]
+
+# Crear un vector de nombres de productos basado en el resultado top_items
+nombres_productos <- names(top_items)
+
+# Crear un vector de valores basado en el resultado top_items
+valores_productos <- unname(top_items)
+
+# Crear un dataframe con dos columnas: Productos y Valores
+dataframe_resultado <- data.frame(Productos = nombres_productos, Valores = valores_productos)
+
+# Crea un subconjunto de tus reglas solo con los elementos principales
+transacciones_subset <- transacciones[, transacciones %in% names(top_items)]
+
+# Dibuja el gráfico para el subconjunto de reglas
+itemFrequencyPlot(transacciones_subset, topN = top_n, col = "skyblue")
+
+
+
+```
+
+## Reglas en las transacciones
+
+```{r, echo=FALSE}
+# Genera reglas de asociación utilizando el algoritmo Apriori
+RulesName <- apriori(transacciones, parameter = list(supp = 0.01, conf = 0.1), minlen = 3)
+
+# Elimina reglas redundantes para mantener solo las reglas únicas
+Non_RulesName <- RulesName[!is.redundant(RulesName)]
+
+# Selecciona las 10 reglas principales después de eliminar las redundantes
+topRules <- Non_RulesName[1:10]
+
+# Ordena las reglas por diferentes métricas: soporte, confianza, lift y cobertura
+rules_supp <- sort(Non_RulesName, by = "support", decreasing = TRUE, na.last = NA)
+rules_conf <- sort(Non_RulesName, by = "confidence", decreasing = TRUE, na.last = NA)
+rules_lift <- sort(Non_RulesName, by = "lift", decreasing = TRUE, na.last = NA)
+rules_cove <- sort(Non_RulesName, by = "coverage", decreasing = TRUE, na.last = NA)
+
+# Selecciona las 15 reglas principales basadas en la métrica de lift
+top_rules_lift <- head(rules_lift, n = 15)
+
+# Muestra las 15 reglas principales basadas en lift
+inspect(top_rules_lift)
+
+# Representa gráficamente las 15 reglas principales en un gráfico de red
+plot(top_rules_lift, method = "graph")
+
+```
+
+Ahora ya tenemos una idea de los productos mas vendidos, y de las reglas de asociación que hay entre los productos.
+Para profundizar mas el analisis vamos a pasarlos a categorias y comparar con los datos de nuestra empresa.
+
+
+Para conseguir el archivo que se carga a continuación, hemos hecho un loop, donde mantiene la estructura del dataframe anterior, pero sustituye cada item por su categoria, de esta manera podemos hacer el analisis de categorias y analizar con los datos que dispone la empresa. el archivo que hemos creado es "transacciones categorias.csv"
+
+## Reglas transaccionales por categoria
+```{r , echo=FALSE}
+# Lee el archivo CSV que contiene las transacciones de categoria y crea un objeto de transacciones
+transacciones_CAT <- read.transactions("transacciones categorias.csv", sep = ",", format = "basket", header = TRUE)
+
+# Calcula los cuantiles del tamaño de las transacciones
+quantile(size(transacciones_CAT), probs = seq(0, 1, 0.1))
+
+# Crea un gráfico de frecuencia de elementos para mostrar los 20 elementos más frecuentes
+itemFrequencyPlot(transacciones_CAT, topN = 20, type = 'absolute')
+
+# Genera reglas de asociación utilizando el algoritmo Apriori con umbrales de soporte y confianza
+rules_cat <- apriori(transacciones_CAT, parameter = list(supp = 0.03, conf = 0.4))
+
+# Elimina reglas redundantes para mantener solo las reglas únicas
+Non_rules_cat <- rules_cat[!is.redundant(rules_cat)]
+
+# Ordena las reglas por diferentes métricas: soporte, confianza, lift y cobertura
+rules_supp_CAT <- sort(Non_rules_cat, by = "support", decreasing = TRUE, na.last = NA)
+rules_conf_CAT <- sort(Non_rules_cat, by = "confidence", decreasing = TRUE, na.last = NA)
+rules_lift_CAT <- sort(Non_rules_cat, by = "lift", decreasing = TRUE, na.last = NA)
+rules_cove_CAT <- sort(Non_rules_cat, by = "coverage", decreasing = TRUE, na.last = NA)
+
+# Selecciona las 20 reglas principales basadas en la métrica de lift
+top_rules_lift_cat <- head(rules_lift_CAT, n = 20)
+
+# Representa gráficamente las 20 reglas principales en un gráfico de red
+plot(top_rules_lift_cat, method = "graph")
+
+
+```
+
+## Analisis entre las categorias de productos de Electronidex Vs Blackwell
+- Primero modificaremos las categorias de Blackwell para que se adecuen a las de Electronidex, porque cada empresa las tiene diferentes,y así poder cruzar los datos correctamente.
+```{r, echo=FALSE}
+# Cargamos lo
+prod_actuales<- read.csv("existingproductattributes2017.csv")
+cat_new<- data.frame(cat_prod$`CATEGORIA PRODUCTO`)
+cat_new<-unique(cat_new)
+cat_old<- unique(data.frame(prod_actuales$ProductType))
+unique(cat_new)
+unique(cat_old)
+
+
+
+```
+
+Vemos que Electronidex trabaja con 17 categorias y Blackwell con 12 de las cuales solo hay en comun 7, por lo que hay 10 categorias que serian mercado nuevo para Blackwell. Las categoria comparatidas son:
+- Desktop
+- Laptops
+- Accessories
+- Monitors
+- Printers
+- Printers Ink
+- Computer Tablets
+
+Decidimos trabajar con el conjunto de categorias siguiente, que nace de una mezcla entre las categorias de cada empresa, serán 22. En el siguiente dataframe veremos las 22 categorias seleccionadas y como les hemos marcado con un tipo en función de si son una categoria de proiducto principal o si son categoria de complemento, esto nos ayuda a definir la estrategia para poder segmentar estas transacciones en 2 grupos, B2B y B2C.
+
+###Criterios
+Los criterios que se han dado para hacer esta segmentación son los siguientes:
+B2B: todas aquellas transacciones que tienen un product principal ("MAIN") >= 3 o en caso de que sea menor solo aquellos que tienen complementos ("ADD")>= 3
+B2C: Seria el resto de transacciones, nos devuelve aquellas donde ("MAIN")<3 i ("ADD")<3.
+
+###Procesos
+Hacemos un loop para cambiar categorias por Main y Add.
+Despues separamos segun los criterios descritos antes y obtenemos los 2 dataframe por tipo de consumidor, donde los tendremos clasificcados por indices y luego extrapolaremos esos indioces para poder separar en el dataframe de transacciones y de esta manera dispondremos de los 2 dataframes con los tipos de consumidores.
+
+```{r}
+df_transaccions_cat<-read.csv("transacciones categorias.csv", sep = ",", header = TRUE)
+categorias_tipo<-read_excel("categorias_tipo.xlsx")
+```
+
+```{r, echo=FALSE}
+# Recorrer las filas de df_transaccions
+
+
+# Definiendo indices de filas con el primer elemento nulo
+indexes_cat <- df_transaccions_cat[df_transaccions_cat$V1 == "",]
+indexes_null_cat <- as.numeric(rownames(indexes))
+
+#Redefiniendo df_transactions sin los indices de transacciones nulas
+df_transaccions_cat <- df_transaccions_cat[-indexes_null_cat,]
+categoria_encontrada <-""
+
+#print("Start loop: ")
+for (row in 1:nrow(df_transaccions_cat)) {
+  for (column in 1:ncol(df_transaccions_cat)) {
+    #print(df_transaccions[row,column])
+    categoria_origin <- df_transaccions_cat[row,column]
+    if (categoria_origin == "") {
+      categoria_encontrada <- df_transaccions_cat[row,column]
+      next
+    }
+    
+    for (cat_row in 1:nrow(categorias_tipo)) {
+      categoria_searched <- categorias_tipo[cat_row,1]
+      
+      #if (value_to_search == "") {
+      #cat("Vacío 2 \n")
+      #next
+      #}
+      
+      #categoria_searched <- str_replace_all(searched_value, " ", "")
+      #categoria_origin <- str_replace_all(value_to_search, " ", "")
+      
+      if (categoria_searched == categoria_origin) {
+        #print(value_to_search)
+        #print(cat_prod[cat_row,2])
+        categoria_encontrada <- categorias_tipo[cat_row,2]
+        
+        next
+        
+      }
+    }
+    #Aun seguimos en loop de columna
+    df_transaccions_cat[row,column]<- categoria_encontrada
+    
+    if (categoria_encontrada == "") {
+      
+      #cat(df_transaccions_cat[row,column], " No se ha encontrado en la fila", row, ".\n")
+      #fucked_up <- append(fucked_up, df_transaccions[row,column])
+      
+      next}
+  }
+  #print(df_transaccions_cat)
+  #cat("Porcentaje : " , ((row * column)   /    (nrow(df_transaccions) * ncol(df_transaccions)) ) * 100, "%\n")
+}
+Type_categories<-df_transaccions_cat
+# Muestra las primeras 5 filas del conjunto de datos Type_categories
+#head(Type_categories, 5)
+
+# Crear un dataframe count_principal con las mismas filas que Type_categories
+
+count_principal <- data.frame("MAIN", "ADD")
+
+# Recorrer Type_categories
+for (row in 1:nrow(Type_categories)) {
+  count_main <- 0  # Reiniciar count_main en cada fila
+  count_add <- 0   # Reiniciar count_add en cada fila
+  
+  for (column in 1:ncol(Type_categories)) {
+    if (Type_categories[row, column] == "Main") {
+      count_main <- count_main + 1
+    } else if (Type_categories[row, column] == "Add") {
+      count_add <- count_add + 1
+    }
+  }
+  
+  # Calcular el porcentaje y mostrarlo
+  #percentage <- ((row * ncol(Type_categories)) / (nrow(Type_categories) * ncol(Type_categories))) * 100
+  #cat("Porcentaje : ", percentage, "%\n")
+  
+  # Actualizar el dataframe count_principal
+  count_principal[row, ] <- c(count_main, count_add)
+}
+
+## VAMOS A SEPARAR SEGUN LOS CRITERIOS EN B2B Y B2C
+df_b2b <- data.frame("MAIN", "ADD")
+df_b2c <- data.frame("MAIN", "ADD")
+df_b2b <- df_b2b[-c(1), ]
+df_b2c <- df_b2c[-c(1), ]
+#count_principal[817,]
+for (row in 1:nrow(count_principal)){
+  #cat("Estoy en fila", row, "y columna", col,"\n")
+  #cat("Main es mayor que 3",count_principal[row,1] >= 3,"\n")
+  if (count_principal[row,1] >= 3){
+    df_b2b<-rbind(df_b2b,count_principal[row,])
+  }
+  else if (count_principal[row,1] < 3 && count_principal[row,2] >= 3){
+      df_b2b<-rbind(df_b2b,count_principal[row,])
+  }
+  else{
+      df_b2c<-rbind(df_b2c,count_principal[row,])
+  }
+}
+
+
+## Ahora queremos volver a crear los df de transacciones pero separados por B2B y B2C
+
+index_B2b<-as.numeric(rownames(df_b2b))
+index_B2c<-as.numeric(rownames(df_b2c))
+df_b2b_transactions<-(df_transaccions[index_B2b,])
+df_b2c_transactions<-(df_transaccions[index_B2c,])
+# Muestra las primeras 5 filas del conjunto de datos df_b2b_transactions
+#head(df_b2b_transactions, 5)
+
+# Muestra las primeras 5 filas del conjunto de datos df_b2c_transactions
+#head(df_b2c_transactions, 5)
+
+```
+
+## Transacciones B2B
+Vamos a analizar las reglas de B2B
+
+```{r, echo=FALSE, message=FALSE}
+# Cargar las transacciones desde un archivo CSV en formato "basket" con encabezados.
+b2b_transacciones <- read.transactions("transacciones B2B.csv", sep = ",", format = "basket", header = TRUE)
+
+# Aplicar el algoritmo Apriori para generar reglas de asociación en las transacciones B2B.
+rules_b2b <- apriori(b2b_transacciones, parameter = list(supp = 0.03, conf = 0.4))
+
+# Filtrar reglas redundantes y almacenar las no redundantes en Non_RulesNameb2b.
+Non_RulesNameb2b <- rules_b2b[!is.redundant(rules_b2b)]
+
+# Ordenar las reglas no redundantes por soporte, confianza, lift y cobertura.
+rules_supp_B2b <- sort(Non_RulesNameb2b, by = "support", decreasing = TRUE, na.last = NA)
+rules_conf_B2b <- sort(Non_RulesNameb2b, by = "confidence", decreasing = TRUE, na.last = NA)
+rules_lift_B2b <- sort(Non_RulesNameb2b, by = "lift", decreasing = TRUE, na.last = NA)
+rules_cove_B2b <- sort(Non_RulesNameb2b, by = "coverage", decreasing = TRUE, na.last = NA)
+
+# Generar un gráfico de las reglas de asociación utilizando el método "graph" y mostrar las 15 principales.
+plot(rules_lift_B2b, method = "graph", n = 15)
+
+
+
+```
+
+Hacemos de nuevo un loop para volver a cambiarlos a categorias, y poder ver las reglas por categoria y segmento (B2B, B2C)
+
+```{r, echo=FALSE}
+
+# Cargar las transacciones desde un archivo CSV en formato "basket" con encabezados.
+b2b_transacciones_categ <- read.transactions("transacciones B2B CAT.csv", sep = ",", format = "basket", header = TRUE)
+
+# Aplicar el algoritmo Apriori para generar reglas de asociación en las transacciones B2B con umbrales de soporte y confianza.
+rules_b2b_cat <- apriori(b2b_transacciones_categ, parameter = list(supp = 0.2, conf = 0.4))
+
+# Filtrar reglas redundantes y almacenar las no redundantes en Non_RulesNameb2b_cat.
+Non_RulesNameb2b_cat <- rules_b2b_cat[!is.redundant(rules_b2b_cat, measure = "support")]
+
+# Ordenar las reglas no redundantes por soporte, confianza, lift y cobertura.
+#rules_supp_B2b_cat <- sort(Non_RulesNameb2b_cat, by = "support", decreasing = TRUE, na.last = NA)
+#rules_conf_B2b_cat <- sort(Non_RulesNameb2b_cat, by = "confidence", decreasing = TRUE, na.last = NA)
+rules_lift_B2b_cat <- sort(Non_RulesNameb2b_cat, by = "lift", decreasing = TRUE, na.last = NA)
+#rules_cove_B2b_cat <- sort(Non_RulesNameb2b_cat, by = "coverage", decreasing = TRUE, na.last = NA)
+
+
+#Intentamos eliminar reglas equivalentes:
+gi <- generatingItemsets(rules_lift_B2b_cat)
+d <- which(duplicated(gi))
+non_redundant_lift_b2b_rules <- rules_lift_B2b_cat[-d]
+inspect(non_redundant_lift_b2b_rules)
+
+# Generar un gráfico de las reglas de asociación utilizando el método "graph" y mostrar las 20 principales.
+inspect(rules_lift_B2b_cat)
+plot(non_redundant_lift_b2b_rules, method = "graph")
+
+```
+
+Buscamos las reglas con un support minimo de 20% y una confidence de un 40%. Con estas condiciones, productos principales como las computer tablets i printers, no tienen reglas de associación.
+Solo tenemos reglas con Laptops y Desktop y se complementan Computert Mice, Monitors y Keyboard
+
+###TOP 10 LIFT:
+Con un minimo de 3 categorias por transaccion.
+```{r, echo=FALSE}
+inspect(rules_lift_B2b_cat[1:10])
+```
+
+#Conclusiones y acciones en B2C:
+
+##Asociación de Laptops, Monitores y Computer Mice: 
+Las reglas 1, 5 y 10 muestran una fuerte asociación entre la compra de laptops, monitores y Computer Mice. Esto sugiere que las empresas que compran laptops y monitores son propensos a comprar Computer Mice. La decisión aquí sería agrupar estos productos en promociones especiales o recomendaciones cruzadas para aumentar las ventas de Computer Mice.
+
+##Desktops y Keyboards: 
+Las reglas 2, 4 y 6 indican que los desktops y los Keyboards están relacionados. Esto significa que cuando las empresas compran desktops, es probable que también compren Keyboards Podemos utilizar esta información para promocionar Keyboards cuando las empresas adquieran un desktop.
+
+##Keyboard y Laptops: 
+La regla 3 muestra que los clientes que compran Keyboards y laptops a menudo también compran desktops. Esta es una observación interesante y podría usarse para estrategias de venta cruzada o para promocionar paquetes que incluyan estos productos.
+
+##Promoción de Combinaciones de Productos: 
+Para impulsar las ventas, podemos considerar la promoción de combinaciones de productos, como paquetes que incluyan laptops, monitores y Computer Mice. Estas promociones podrían atraer a clientes que deseen adquirir todo el conjunto de productos.
+
+
+#B2C
+
+```{r, echo=FALSE}
+# Carga las transacciones desde un archivo CSV en un formato de cesta
+b2c_transacciones_categ <- read.transactions("transacciones B2c CAT.csv", sep = ",", format = "basket", header = TRUE)
+
+# Aplica el algoritmo Apriori a las transacciones con ciertos parámetros
+rules_b2c_cat <- apriori(b2c_transacciones_categ, parameter = list(supp = 0.009, conf = 0.05))
+
+# Filtra las reglas para eliminar las redundantes
+Non_RulesNameb2c_cat <- rules_b2c_cat[!is.redundant(rules_b2c_cat)]
+
+# Ordena las reglas por soporte, confianza, lift y cobertura
+rules_supp_B2c_cat <- sort(Non_RulesNameb2c_cat, by = "support", decreasing = TRUE, na.last = NA)
+rules_conf_B2c_cat <- sort(Non_RulesNameb2c_cat, by = "confidence", decreasing = TRUE, na.last = NA)
+rules_lift_B2c_cat <- sort(Non_RulesNameb2c_cat, by = "lift", decreasing = TRUE, na.last = NA)
+rules_cove_B2c_cat <- sort(Non_RulesNameb2c_cat, by = "coverage", decreasing = TRUE, na.last = NA)
+
+# Crea un gráfico de las reglas ordenadas por lift
+plot(rules_lift_B2c_cat, method = "graph")
+
+
+```{r, echo=FALSE}
+inspect(rules_lift_B2c_cat)
+```
+
+Podemos Observar como en B2C, el comportamiento mayoritario es comprar productos de forma individual, ya sea un Principal como Laptop o Desktop o complementos.
+ 
+Pero usemos como base los conjuntos, vemos que cuando hay 2 principales se tiende a comprar un complemento
+```{r, echo=FALSE}
+inspect(rules_lift_B2c_cat[1:5])
+```
+
+#Conclusiones y acciones en B2C:
+
+##Venta Cruzada de Desktops y Monitores: 
+La primera regla muestra que comprar tanto computadoras de escritorio ("Desktop") como monitores tiene una elevación (lift) de 1.25, lo que significa que la probabilidad de comprar ambos productos juntos es 1.25 veces mayor de lo que se esperaría al azar. La decisión aquí sería promocionar paquetes que incluyan Desktop y monitores, como ofertas especiales o descuentos al comprar ambos productos. Esto podría aumentar las ventas de ambos artículos.
+
+##Accesorios y Computadoras de Escritorio: 
+La segunda regla indica que comprar accesorios tiene una fuerte relación con la compra de Desktops. Esto sugiere que los clientes que compran un Desktop también están interesados en accesorios. Podemos aprovechar esta relación ofreciendo descuentos o paquetes que incluyan accesorios cuando los clientes compren un Desktop.
+
+##Monitores y Computadoras de Escritorio:  
+Las reglas 4 y 5 muestran una relación entre monitores y Desktop en ambas direcciones. Esto sugiere que los clientes que compran un Desktop también compran monitores, y viceversa. Puedes usar esta información para promocionar monitores cuando los clientes compren Desktop, y viceversa.
+
+##Inventario y Disponibilidad: 
+Hay que asegurase de tener suficiente inventario de monitores, Desktop y accesorios, ya que estas reglas sugieren una alta probabilidad de que se compren juntos. 
+
+
+```{r, echo=FALSE}
+
+```
+
+```{r, echo=FALSE}
+
+```
+
+```{r, echo=FALSE}
+
+```
+
+
+
+
+
+
+
+
+
