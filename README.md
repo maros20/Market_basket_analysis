@@ -1,4 +1,4 @@
-# Market_basket_analysis
+# Transactional analysis of a computer store
 The code presented in this project performs an analysis of electronic product sales transactions from two companies: Electronidex and Blackwell. 
 The goal of the analysis is to identify improvement opportunities for Blackwell.
 
