@@ -1,0 +1,125 @@
+---
+title: "Product suggestion"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+# Cargamos librerias
+library("dplyr")
+library("caret")
+library("ggplot2")
+library("lattice")
+library(corrplot)
+library(psych)
+library(GGally)
+library(gridExtra)
+library(lmtest)
+library(car)
+library(gbm)
+library(e1071)
+library(RColorBrewer)
+library("arules")
+library("arulesViz")
+library(pdftools)
+library(readxl)
+library(stringr)
+library("tidyverse")
+
+```
+
+```{r, echo=FALSE}
+Product_suggestion <- function() {
+    producto<- NULL
+    producto_sin_espacios<- NULL
+    productos_separados<- NULL
+    #Obteniendo input Empresa/Consumidor
+    tipo_consumidor <- readline("Escoga entre Empresa o Consumidor: ")
+    
+    #Verificando que el input es correcto
+    while (!(tipo_consumidor %in% c("Empresa", "Consumidor"))) {
+      print("Error. Introduce la opción correcta.")
+      tipo_consumidor <- readline("Escoga entre Empresa o Consumidor: ")
+    }
+    cat("Categoria compra: ", tipo_consumidor, "\n")
+    #Pidiendo input del producto deseado
+    producto <- readline("Que producto desea comprar?")
+    producto_sin_espacios <- str_replace_all(producto, " ", "")
+    productos_separados <- strsplit(producto_sin_espacios, ",")[[1]]
+    
+    # Verificar que cada producto esté en la lista de productos disponibles
+    for (prod in productos_separados) {
+      if (!(prod %in% buscar_producto_sin_espacios)) {
+        print(paste("Error, el producto", prod, "no está en la lista. Introduce la opción correcta."))
+        producto <- readline("Que producto desea comprar?")
+        producto_sin_espacios <- str_replace_all(producto, " ", "")
+        productos_separados <- strsplit(producto_sin_espacios, ",")[[1]]
+      }
+    }
+    
+    cat("Productos encontrados: ", producto, "\n")
+    producto_con_espacios<- strsplit(producto, ",")[[1]]
+   
+    if (tipo_consumidor == "Empresa") {
+      for (prod in producto_con_espacios){
+        function_rules <- subset(rules_b2b, lhs %in% prod)
+        Non_function_rules <- function_rules[!is.redundant(function_rules, measure = "support")]
+      
+      # Ordenar las reglas no redundantes por soporte, confianza, lift y cobertura.
+        
+        Non_function_rules_lift <- sort(Non_function_rules, by = "lift", decreasing = TRUE, na.last = NA)
+        productos_en_rhs <- unique(unlist(slot(Non_function_rules_lift, "rhs")))
+        
+        
+      cat("Otros usuarios que han comprado", prod, "también han comprado:")
+      inspect(productos_en_rhs[1:5])
+      inspect(Non_function_rules_lift[1:5])
+      }
+      return("Gracias por su visita")
+      }else {
+        for (prod in producto_con_espacios){
+          function_rules <- subset(rules_b2c, lhs %in% prod)
+          Non_function_rules <- function_rules[!is.redundant(function_rules, measure = "support")]
+      
+      # Ordenar las reglas no redundantes por soporte, confianza, lift y cobertura.
+      
+          Non_function_rules_lift <- sort(Non_function_rules, by = "lift", decreasing = TRUE, na.last = NA)
+          productos_en_rhs <- unique(unlist(slot(Non_function_rules_lift, "rhs")))
+          
+      
+      cat("Otros usuarios que han comprado", producto, "también han comprado:")
+      inspect(productos_en_rhs[1:5])
+      inspect(Non_function_rules_lift[1:5])
+        } 
+      
+      return("Gracias por su visita")
+    }
+  }
+```
+
+# How works this function:
+1- The function starts: "Product_suggestion()"" 
+"Escoga entre Empresa o Consumidor:""
+2- The user is asked to choose between "Empresa" (company) or "Consumidor" (consumer). This decision will determine which dataset to use for the product suggestions.
+3- The user is asked to select the product they are interested in.
+"Categoria compra:  Empresa" 
+"Que producto desea comprar?"
+4- A list of the top 5 products that are most commonly bought together with the selected product is displayed. The list is sorted by lift, which is a measure of how strongly the products are associated with each other..
+"Productos encontrados:  iMac 
+Otros usuarios que han comprado iMac también han comprado:    items                       
+[1] {Generic Black 3-Button}    
+[2] {Mackie CR Speakers}        
+[3] {HDMI Adapter}              
+[4] {Logitech Wireless Keyboard}
+[5] {Rokono Mini Speaker}    
+
+5- The data for the association rule is displayed. This includes the support, confidence, coverage, and lift of the rule.
+    lhs       rhs                          support     confidence  coverage  lift     count
+[1] {iMac} => {Generic Black 3-Button}     0.006636694 0.016568680 0.4005566 1.682441 31   
+[2] {iMac} => {Mackie CR Speakers}         0.009419824 0.023516836 0.4005566 1.547143 44   
+[3] {iMac} => {HDMI Adapter}               0.006208521 0.015499733 0.4005566 1.477536 29   
+[4] {iMac} => {Logitech Wireless Keyboard} 0.002354956 0.005879209 0.4005566 1.445357 11   
+[5] {iMac} => {Rokono Mini Speaker}        0.004709912 0.011758418 0.4005566 1.408297 22   
+
+6- A thank-you message is displayed to the user..
+[1] "Gracias por su visita"
